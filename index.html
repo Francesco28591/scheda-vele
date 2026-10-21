@@ -171,7 +171,9 @@
   :root{color-scheme:light;}
   .od-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;line-height:1.4;border:1px solid var(--line);background:#fff;color:var(--ink);}
   .od-bar.ok{border-color:var(--teal);background:var(--ok-bg);color:var(--ok-ink);}
-  .od-bar.warn{border-color:#C69214;background:#FDF6E3;color:#6B4E00;}
+  .od-bar.warn{border-color:#C69214;background:#FDF6E3;color:#6B4E00;position:sticky;top:calc(var(--hdr,110px) + env(safe-area-inset-top,0px) + 6px);z-index:15;box-shadow:0 2px 8px rgba(3,34,62,.15);}
+  .field input,.field select,.grid2 input{min-width:0;max-width:100%;box-sizing:border-box;}
+  input[type=date]{width:100%;min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;min-height:46px;}
   .od-bar .od-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .od-bar .btn{border-color:var(--navy);color:var(--navy);background:#fff;padding:8px 14px;}
   .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:10px;}
@@ -1005,23 +1007,31 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
           return r.accessToken;
         } catch(e){ throw new Error('needlogin'); }
       },
-      login(){ return pca.loginRedirect({ scopes: SCOPES }); }
+      login(){
+        const acc = pca.getActiveAccount();
+        if(acc) return pca.acquireTokenRedirect({ scopes: SCOPES, account: acc, loginHint: acc.username });
+        return pca.loginRedirect({ scopes: SCOPES });
+      }
     };
   })();
   let authError = '';
+  let sessionExpired = false;
 
   function graphPath(name){
     return (OD_FOLDER + '/' + name).split('/').map(encodeURIComponent).join('/');
   }
   async function uploadToOneDrive(name, body, contentType){
-    const token = await auth.token();
+    let token;
+    try { token = await auth.token(); }
+    catch(e){ sessionExpired = true; refreshOdBar(); throw e; }
     const res = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/' + graphPath(name) + ':/content?@microsoft.graph.conflictBehavior=replace', {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': contentType },
       body
     });
-    if(res.status === 401) throw new Error('needlogin');
+    if(res.status === 401){ sessionExpired = true; refreshOdBar(); throw new Error('needlogin'); }
     if(!res.ok) throw new Error('graph_' + res.status);
+    sessionExpired = false;
     return true;
   }
   function uploadErrorText(e){
@@ -1084,15 +1094,20 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     const bar = el('odBar'), text = el('odText');
     const acc = auth.account();
     const n = pendingCount();
-    el('odLogin').hidden = !!acc;
-    el('odSend').hidden = !(acc && n > 0);
+    const needLogin = !acc || sessionExpired;
+    el('odLogin').hidden = !needLogin;
+    el('odSend').hidden = !(acc && !sessionExpired && n > 0);
     if(authError){
       bar.className = 'od-bar warn';
       text.textContent = authError;
       el('odLogin').hidden = false;
       return;
     }
-    if(acc){
+    if(acc && sessionExpired){
+      bar.className = 'od-bar warn';
+      text.textContent = 'L\'accesso a OneDrive è scaduto. Tocca "Accedi a OneDrive": bastano un paio di secondi.' +
+        (n > 0 ? ' Schede da inviare: ' + n + '.' : '');
+    } else if(acc){
       bar.className = 'od-bar ok';
       text.textContent = 'OneDrive collegato come ' + (acc.username || 'utente') +
         '. Salvando, JSON e PDF vanno in ' + OD_FOLDER + '.' +
@@ -1660,6 +1675,10 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
   });
   window.addEventListener('online', () => { flushPending(); });
 
+  // ---------- altezza intestazione (per la barra fissa) ----------
+  function setHdr(){ const h = document.querySelector('header.topbar'); if(h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px'); }
+  setHdr(); window.addEventListener('resize', setHdr);
+
   // ---------- avvio ----------
   renderArchive();
   (async function(){
@@ -1667,6 +1686,18 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     catch(e){ authError = 'Accesso a Microsoft non riuscito o non disponibile. Riprova, oppure controlla la connessione.'; }
     refreshOdBar();
     if(auth.account()){
+      try { await auth.token(); }
+      catch(e){ sessionExpired = true; refreshOdBar(); }
+    }
+    if((!auth.account() || sessionExpired) && !authError){
+      let last = 0;
+      try { last = parseInt(sessionStorage.getItem('odAutoLogin') || '0', 10); } catch(e){}
+      if(Date.now() - last > 120000){
+        try { sessionStorage.setItem('odAutoLogin', String(Date.now())); } catch(e){}
+        try { await auth.login(); return; } catch(e){}
+      }
+    }
+    if(auth.account() && !sessionExpired){
       const r = await flushPending();
       if(r.sent) showStatus(r.sent + (r.sent === 1 ? ' scheda inviata' : ' schede inviate') + ' a OneDrive.');
     }
