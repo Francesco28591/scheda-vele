@@ -171,14 +171,15 @@
   :root{color-scheme:light;}
   .od-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;line-height:1.4;border:1px solid var(--line);background:#fff;color:var(--ink);}
   .od-bar.ok{border-color:var(--teal);background:var(--ok-bg);color:var(--ok-ink);}
-  .od-bar.warn{border-color:#C69214;background:#FDF6E3;color:#6B4E00;position:sticky;top:calc(var(--hdr,110px) + env(safe-area-inset-top,0px) + 6px);z-index:15;box-shadow:0 2px 8px rgba(3,34,62,.15);}
-  .field input,.field select,.grid2 input{min-width:0;max-width:100%;box-sizing:border-box;}
-  input[type=date]{width:100%;min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;min-height:46px;}
+  .od-bar.warn{border-color:#C69214;background:#FDF6E3;color:#6B4E00;}
   .od-bar .od-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .od-bar .btn{border-color:var(--navy);color:var(--navy);background:#fff;padding:8px 14px;}
   .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:10px;}
   .tag.ok{background:var(--ok-bg);color:var(--ok-ink);}
   .tag.wait{background:#FDF6E3;color:#6B4E00;}
+  .od-bar.warn{position:sticky;top:calc(var(--hdr,110px) + env(safe-area-inset-top,0px) + 6px);z-index:15;box-shadow:0 2px 8px rgba(3,34,62,.15);}
+  .field input,.field select,.grid2 input{min-width:0;max-width:100%;box-sizing:border-box;}
+  input[type=date]{width:100%;min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;min-height:46px;}
 </style>
 </head>
 <body>
@@ -1059,8 +1060,8 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
   }
   async function sendRecord(rec){
     const clean = cleanRecord(rec);
-    await uploadToOneDrive(jsonFileName(clean), JSON.stringify(clean, null, 2), 'application/json');
-    await uploadToOneDrive(pdfFileName(clean), buildPdfBlob(clean), 'application/pdf');
+    await uploadToOneDrive(folderName(clean) + '/' + jsonFileName(clean), JSON.stringify(clean, null, 2), 'application/json');
+    await uploadToOneDrive(folderName(clean) + '/' + pdfFileName(clean), buildPdfBlob(clean), 'application/pdf');
   }
   function markSent(code){
     const arch = getArchive();
@@ -1110,7 +1111,7 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     } else if(acc){
       bar.className = 'od-bar ok';
       text.textContent = 'OneDrive collegato come ' + (acc.username || 'utente') +
-        '. Salvando, JSON e PDF vanno in ' + OD_FOLDER + '.' +
+        '. Salvando, JSON e PDF vanno in ' + OD_FOLDER + '/<cliente - porto>.' +
         (n > 0 ? ' Schede da inviare: ' + n + '.' : '');
     } else {
       bar.className = 'od-bar warn';
@@ -1224,7 +1225,7 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
   }
 
   // ---------- raccolta dati form ----------
-  function val(id){ return el(id).value; }
+  function val(id){ return String(el(id).value).trim(); }
   function checked(id){ return el(id).checked; }
   function num(id){ const v = el(id).value; return v === '' ? null : Number(v); }
 
@@ -1320,6 +1321,11 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
   function jsonFileName(data){
     return `controllo_${sanitizeForFilename(data.cliente)||'cliente'}_${sanitizeForFilename(data.barca)||'barca'}_${sanitizeForFilename(data.tipo_vela)||'vela'}_${data.data_controllo||'data'}.json`;
   }
+  function folderName(data){
+    const clean = t => String(t || '').replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+    let f = [clean(data.cliente), clean(data.porto_ormeggio)].filter(Boolean).join(' - ').slice(0, 80).replace(/[. ]+$/, '');
+    return f || 'Senza cliente';
+  }
   function pdfFileName(data){
     return `Controllo_${sanitizeForFilename(data.cliente)||'Cliente'}_${sanitizeForFilename(data.barca)||'Barca'}_${sanitizeForFilename(data.tipo_vela)||'Vela'}_${data.data_controllo||'data'}.pdf`;
   }
@@ -1362,7 +1368,9 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
       await sendRecord(data);
       if(stored) markSent(code);
       renderArchive(); refreshOdBar();
-      showStatus('Scheda ' + code + ' salvata su OneDrive (JSON e PDF) in ' + OD_FOLDER + '.');
+      const folder = folderName(data);
+      resetForm();
+      showStatus('Scheda ' + code + ' salvata su OneDrive (JSON e PDF) in ' + OD_FOLDER + '/' + folderName(data) + '. Il modulo è stato svuotato: puoi compilare la scheda successiva.');
     } catch(e){
       if(!stored) browserDownload(jsonFileName(data), JSON.stringify(data, null, 2), 'application/json');
       renderArchive(); refreshOdBar();
@@ -1378,14 +1386,7 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     clearTimeout(clearTimer);
     el('clearBtn').textContent = 'Nuova scheda';
   }
-  el('clearBtn').addEventListener('click', function(){
-    if(!clearArmed){
-      clearArmed = true;
-      this.textContent = 'Conferma: svuota tutto';
-      clearTimer = setTimeout(resetClearBtn, 4000);
-      return;
-    }
-    resetClearBtn();
+  function resetForm(){
     lastSaved = null;
     document.querySelectorAll('main input[type=text], main input[type=number], main input[type=date]').forEach(i => i.value = '');
     document.querySelectorAll('main input[type=checkbox]').forEach(i => i.checked = false);
@@ -1398,8 +1399,18 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     photos = [];
     renderPhotos();
     hideError();
-    hideStatus();
     window.scrollTo({top:0, behavior:'smooth'});
+  }
+  el('clearBtn').addEventListener('click', function(){
+    if(!clearArmed){
+      clearArmed = true;
+      this.textContent = 'Conferma: svuota tutto';
+      clearTimer = setTimeout(resetClearBtn, 4000);
+      return;
+    }
+    resetClearBtn();
+    resetForm();
+    hideStatus();
   });
 
   // ---------- riepilogo leggibile ----------
@@ -1475,9 +1486,9 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     if(c4.bugna.soft_clew) bugna.push('Soft Clew' + (c4.bugna.rutgerson ? ' (Rutgerson ' + c4.bugna.rutgerson + ')' : ''));
     out.push(sec('4. Sostituzione zerli', [
       row('Materiale zerlo', c4.materiale),
-      c4.penna.spunta && row('Penna', penna.join(' · ') || 'Sì'),
-      c4.mura.spunta && row('Mura', c4.mura.oring ? oring(true, c4.mura.misura_oring) : 'Sì'),
-      c4.bugna.spunta && row('Bugna', bugna.join(' · ') || 'Sì'),
+      (c4.penna.spunta || c4.penna.oring || c4.penna.tavoletta) && row('Penna', penna.join(' · ') || 'Sì'),
+      (c4.mura.spunta || c4.mura.oring) && row('Mura', c4.mura.oring ? oring(true, c4.mura.misura_oring) : 'Sì'),
+      (c4.bugna.spunta || c4.bugna.oring || c4.bugna.soft_clew) && row('Bugna', bugna.join(' · ') || 'Sì'),
       row('Altro', c4.altro),
       c4.ore !== null && row('Ore', c4.ore + ' h')
     ]));
@@ -1612,7 +1623,7 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
     }
     msg.textContent = 'Invio a OneDrive...';
     try {
-      await uploadToOneDrive(pdfFileName(summaryData), blob, 'application/pdf');
+      await uploadToOneDrive(folderName(summaryData) + '/' + pdfFileName(summaryData), blob, 'application/pdf');
       msg.textContent = 'PDF inviato a OneDrive.';
     } catch(e){
       browserDownload(pdfFileName(summaryData), blob, 'application/pdf');
@@ -1678,6 +1689,27 @@ class En{constructor(e,t,r,n,o,i,a,s){this.canonicalAuthority=e,this._canonicalA
   // ---------- altezza intestazione (per la barra fissa) ----------
   function setHdr(){ const h = document.querySelector('header.topbar'); if(h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px'); }
   setHdr(); window.addEventListener('resize', setHdr);
+
+  // ---------- tastiera: niente correzione automatica (cambia le parole tecniche) ----------
+  document.querySelectorAll('main input[type=text], main textarea').forEach(i => {
+    i.setAttribute('autocorrect', 'off');
+    i.setAttribute('autocomplete', 'off');
+    i.setAttribute('spellcheck', 'false');
+  });
+
+  // ---------- spunta automatica: se compili un dettaglio, la voce si spunta da sola ----------
+  document.querySelectorAll('.check-row').forEach(row => {
+    const main = row.querySelector(':scope > input[type=checkbox]');
+    if(!main) return;
+    row.querySelectorAll('.extra input, .extra select').forEach(inp => {
+      const fire = () => {
+        const on = inp.type === 'checkbox' ? inp.checked : String(inp.value).trim() !== '';
+        if(on) main.checked = true;
+      };
+      inp.addEventListener('input', fire);
+      inp.addEventListener('change', fire);
+    });
+  });
 
   // ---------- avvio ----------
   renderArchive();
